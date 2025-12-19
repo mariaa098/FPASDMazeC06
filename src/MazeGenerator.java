@@ -355,5 +355,303 @@ public class MazeGenerator extends JFrame {
         return item;
     }
 
+    private JButton createMarioButton(String text, Color bgColor, String emoji) {
+        JButton btn = new JButton(emoji + " " + text);
+        btn.setFont(new Font("Monospaced", Font.BOLD, 14));
+        btn.setBackground(bgColor);
+        btn.setForeground(BUTTON_TEXT_COLOR);
+        btn.setFocusPainted(false);
+        btn.setBorderPainted(false);
+        btn.setContentAreaFilled(false);
+        btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        btn.setOpaque(false);
+
+        btn.setUI(new BasicButtonUI() {
+            @Override
+            public void paint(Graphics g, JComponent c) {
+                Graphics2D g2d = (Graphics2D) g;
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+                AbstractButton button = (AbstractButton) c;
+                int width = button.getWidth();
+                int height = button.getHeight();
+
+                Color currentColor = button.getModel().isRollover() ? bgColor.brighter() : bgColor;
+                if (button.getModel().isPressed()) {
+                    currentColor = bgColor.darker();
+                }
+
+                GradientPaint gradient = new GradientPaint(
+                        0, 0, brighten(currentColor, 0.4f),  // Atas terang (pantulan cahaya)
+                        0, height, currentColor  // Bawah normal
+                );
+                g2d.setPaint(gradient);
+                g2d.fillRoundRect(0, 0, width, height, 12, 12);  // Rounded corners
+
+                GradientPaint highlight = new GradientPaint(
+                        0, 0, new Color(255, 255, 255, 100),  // Putih transparan
+                        0, height / 2, new Color(255, 255, 255, 0)  // Fade ke transparan
+                );
+                g2d.setPaint(highlight);
+                g2d.fillRoundRect(0, 0, width, height / 2, 12, 12);
+
+                g2d.setColor(new Color(0, 0, 0, 30));
+                g2d.drawRoundRect(0, 0, width - 1, height - 1, 12, 12);
+                super.paint(g, c);
+            }
+        });
+
+        btn.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseEntered(java.awt.event.MouseEvent evt) {
+                btn.repaint();
+            }
+            public void mouseExited(java.awt.event.MouseEvent evt) {
+                btn.repaint();
+            }
+        });
+        return btn;
+    }
+
+    private Color brighten(Color color, float factor) {
+        int r = Math.min(255, (int)(color.getRed() + (255 - color.getRed()) * factor));
+        int g = Math.min(255, (int)(color.getGreen() + (255 - color.getGreen()) * factor));
+        int b = Math.min(255, (int)(color.getBlue() + (255 - color.getBlue()) * factor));
+        return new Color(r, g, b);
+    }
+
+    private void customizeOptionPane() {
+        UIManager.put("OptionPane.background", PANEL_COLOR);
+        UIManager.put("Panel.background", PANEL_COLOR);
+        UIManager.put("OptionPane.messageFont", PIXEL_FONT);
+        UIManager.put("OptionPane.buttonFont", PIXEL_FONT);
+        UIManager.put("OptionPane.messageForeground", Color.WHITE);
+
+        UIManager.put("Button.background", BUTTON_COLOR);
+        UIManager.put("Button.foreground", BUTTON_TEXT_COLOR);
+        UIManager.put("Button.font", PIXEL_FONT);
+        UIManager.put("Button.border", BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Color.BLACK, 3),
+                BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(Color.WHITE, 2),
+                        BorderFactory.createEmptyBorder(8, 12, 8, 12)
+                )
+        ));
+        UIManager.put("Button.select", BUTTON_COLOR);
+        UIManager.put("Button.focus", new Color(0,0,0,0));
+    }
+
+    private void stopCurrentThread() {
+        if (currentSolvingThread != null && currentSolvingThread.isAlive()) {
+            stopCurrentSolving.set(true);
+            currentSolvingThread.interrupt();
+            try {
+                currentSolvingThread.join(300);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void initializeMaze() {
+        for (int i = 0; i < ROWS; i++) {
+            for (int j = 0; j < COLS; j++) {
+                maze[i][j] = new Cell(i, j);
+            }
+        }
+    }
+
+    private void generateMaze() {
+        stopCurrentThread();
+        resetMaze();
+        new Thread(() -> {
+            primAlgorithmWithMorePaths();
+            assignTerrainTypes();
+            graph = new WeightedGraph(maze, ROWS, COLS);
+            start = maze[0][0];
+            end = maze[ROWS-1][COLS-1];
+            start.isStart = true;
+            end.isEnd = true;
+            SwingUtilities.invokeLater(() -> {
+                mazePanel.setMaze(maze);
+                mazePanel.setPlayerPosition(0, 0);
+            });
+        }).start();
+    }
+
+    private void assignTerrainTypes() {
+        Random rand = new Random();
+        for (int i = 0; i < ROWS; i++) {
+            for (int j = 0; j < COLS; j++) {
+                int r = rand.nextInt(100);
+                if (r < 45) maze[i][j].terrain = Terrain.STONE;
+                else if (r < 65) maze[i][j].terrain = Terrain.GRASS;
+                else if (r < 82) maze[i][j].terrain = Terrain.SAND;
+                else maze[i][j].terrain = Terrain.LAVA;
+            }
+        }
+        maze[0][0].terrain = Terrain.STONE;
+        maze[ROWS-1][COLS-1].terrain = Terrain.STONE;
+    }
+
+    private void primAlgorithmWithMorePaths() {
+        Random rand = new Random();
+        List<Wall> walls = new ArrayList<>();
+        Set<Cell> visited = new HashSet<>();
+
+        Cell current = maze[rand.nextInt(ROWS)][rand.nextInt(COLS)];
+        visited.add(current);
+        addWalls(current, walls);
+
+        while (!walls.isEmpty()) {
+            Wall wall = walls.remove(rand.nextInt(walls.size()));
+            Cell cell1 = wall.cell1;
+            Cell cell2 = wall.cell2;
+
+            if (visited.contains(cell1) != visited.contains(cell2)) {
+                removeWall(cell1, cell2);
+                Cell unvisited = visited.contains(cell1) ? cell2 : cell1;
+                visited.add(unvisited);
+                addWalls(unvisited, walls);
+            }
+        }
+
+        List<Wall> allWalls = new ArrayList<>();
+        for (int i = 0; i < ROWS; i++) {
+            for (int j = 0; j < COLS; j++) {
+                Cell c = maze[i][j];
+                if (c.rightWall && j < COLS - 1) allWalls.add(new Wall(c, maze[i][j+1]));
+                if (c.bottomWall && i < ROWS - 1) allWalls.add(new Wall(c, maze[i+1][j]));
+            }
+        }
+        int wallsToRemove = (int) (allWalls.size() * 0.3);
+        for (int i = 0; i < wallsToRemove && !allWalls.isEmpty(); i++) {
+            Wall wall = allWalls.remove(rand.nextInt(allWalls.size()));
+            removeWall(wall.cell1, wall.cell2);
+        }
+    }
+
+    private void addWalls(Cell cell, List<Wall> walls) {
+        int[][] dirs = {{-1,0}, {1,0}, {0,-1}, {0,1}};
+        for (int[] dir : dirs) {
+            int nr = cell.row + dir[0];
+            int nc = cell.col + dir[1];
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+                walls.add(new Wall(cell, maze[nr][nc]));
+            }
+        }
+    }
+
+    private void removeWall(Cell c1, Cell c2) {
+        if (c1.row == c2.row) {
+            if (c1.col < c2.col) { c1.rightWall = false; c2.leftWall = false; }
+            else { c1.leftWall = false; c2.rightWall = false; }
+        } else {
+            if (c1.row < c2.row) { c1.bottomWall = false; c2.topWall = false; }
+            else { c1.topWall = false; c2.bottomWall = false; }
+        }
+    }
+
+    private void solveBFS() {
+        if (graph == null) return;
+
+        Queue<Cell> queue = new LinkedList<>();
+        Map<Cell, Cell> parent = new HashMap<>();
+        Set<Cell> visited = new HashSet<>();
+        queue.offer(start);
+        visited.add(start);
+
+        while (!queue.isEmpty() && !stopCurrentSolving.get()) {
+            Cell current = queue.poll();
+            current.isVisited = true;
+            SwingUtilities.invokeLater(() -> mazePanel.repaint());
+            if (!sleepInterruptible(DELAY)) return;
+
+            if (current == end) {
+                tracePath(parent, end);
+                return;
+            }
+
+            for (Cell neighbor : graph.getNeighbors(current)) {
+                if (!visited.contains(neighbor) && !stopCurrentSolving.get()) {
+                    visited.add(neighbor);
+                    parent.put(neighbor, current);
+                    queue.offer(neighbor);
+                }
+            }
+        }
+    }
+
+    private void solveDFS() {
+        if (graph == null) return;
+
+        Stack<Cell> stack = new Stack<>();
+        Map<Cell, Cell> parent = new HashMap<>();
+        Set<Cell> visited = new HashSet<>();
+        stack.push(start);
+        visited.add(start);
+
+        while (!stack.isEmpty() && !stopCurrentSolving.get()) {
+            Cell current = stack.pop();
+            current.isVisited = true;
+            SwingUtilities.invokeLater(() -> mazePanel.repaint());
+            if (!sleepInterruptible(DELAY)) return;
+
+            if (current == end) {
+                tracePath(parent, end);
+                return;
+            }
+
+            for (Cell neighbor : graph.getNeighbors(current)) {
+                if (!visited.contains(neighbor) && !stopCurrentSolving.get()) {
+                    visited.add(neighbor);
+                    parent.put(neighbor, current);
+                    stack.push(neighbor);
+                }
+            }
+        }
+    }
+
+    private void solveDijkstra() {
+        if (graph == null) return;
+
+        PriorityQueue<Node> pq = new PriorityQueue<>();
+        Map<Cell, Integer> dist = new HashMap<>();
+        Map<Cell, Cell> parent = new HashMap<>();
+        Set<Cell> visited = new HashSet<>();
+
+        for (int i = 0; i < ROWS; i++) {
+            for (int j = 0; j < COLS; j++) dist.put(maze[i][j], Integer.MAX_VALUE);
+        }
+
+        dist.put(start, 0);
+        pq.offer(new Node(start, 0));
+
+        while (!pq.isEmpty() && !stopCurrentSolving.get()) {
+            Node node = pq.poll();
+            Cell current = node.cell;
+
+            if (visited.contains(current)) continue;
+            visited.add(current);
+            current.isVisited = true;
+            SwingUtilities.invokeLater(() -> mazePanel.repaint());
+            if (!sleepInterruptible(DELAY)) return;
+
+            if (current == end) {
+                tracePath(parent, end);
+                return;
+            }
+
+            for (Cell neighbor : graph.getNeighbors(current)) {
+                if (!visited.contains(neighbor) && !stopCurrentSolving.get()) {
+                    int newDist = dist.get(current) + neighbor.terrain.weight;
+                    if (newDist < dist.get(neighbor)) {
+                        dist.put(neighbor, newDist);
+                        parent.put(neighbor, current);
+                        pq.offer(new Node(neighbor, newDist));
+                    }
+                }
+            }
+        }
+    }
 
 }
