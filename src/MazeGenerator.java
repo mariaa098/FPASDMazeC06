@@ -654,4 +654,328 @@ public class MazeGenerator extends JFrame {
         }
     }
 
+    private void solveAStar() {
+        if (graph == null) return;
+        PriorityQueue<Node> pq = new PriorityQueue<>();
+        Map<Cell, Integer> gScore = new HashMap<>();
+        Map<Cell, Cell> parent = new HashMap<>();
+        Set<Cell> visited = new HashSet<>();
+
+        for (int i = 0; i < ROWS; i++) {
+            for (int j = 0; j < COLS; j++) gScore.put(maze[i][j], Integer.MAX_VALUE);
+        }
+
+        gScore.put(start, 0);
+        int fScore = heuristic(start, end);
+        pq.offer(new Node(start, fScore));
+
+        while (!pq.isEmpty() && !stopCurrentSolving.get()) {
+            Node node = pq.poll();
+            Cell current = node.cell;
+
+            if (visited.contains(current)) continue;
+            visited.add(current);
+            current.isVisited = true;
+            SwingUtilities.invokeLater(() -> mazePanel.repaint());
+            if (!sleepInterruptible(DELAY)) return;
+
+            if (current == end) {
+                tracePath(parent, end);
+                return;
+            }
+
+            for (Cell neighbor : graph.getNeighbors(current)) {
+                if (!visited.contains(neighbor) && !stopCurrentSolving.get()) {
+                    int tentativeG = gScore.get(current) + neighbor.terrain.weight;
+                    if (tentativeG < gScore.get(neighbor)) {
+                        gScore.put(neighbor, tentativeG);
+                        parent.put(neighbor, current);
+                        int f = tentativeG + heuristic(neighbor, end);
+                        pq.offer(new Node(neighbor, f));
+                    }
+                }
+            }
+        }
+    }
+
+    private int heuristic(Cell a, Cell b) {
+        return Math.abs(a.row - b.row) + Math.abs(a.col - b.col);
+    }
+
+    private void tracePath(Map<Cell, Cell> parent, Cell end) {
+        if (stopCurrentSolving.get()) return;
+
+        SoundManager.stopSound(bgMusic);
+        SoundManager.playSound("show_time.wav");
+
+        new Thread(() -> {
+            try {
+                Thread.sleep(1000);
+                if (!stopCurrentSolving.get()) {
+                    heroMusic = SoundManager.playSoundLoop("hero.wav");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }).start();
+
+        List<Cell> path = new ArrayList<>();
+        int totalCost = 0;
+        Cell current = end;
+
+        while (current != null) {
+            path.add(current);
+            if (current != start) totalCost += current.terrain.weight;
+            current = parent.get(current);
+        }
+        Collections.reverse(path);
+
+        for (Cell cell : path) {
+            if (stopCurrentSolving.get()) return;
+            cell.isPath = true;
+            SwingUtilities.invokeLater(() -> mazePanel.repaint());
+            if (!sleepInterruptible(DELAY)) return;
+        }
+
+        for (Cell cell : path) {
+            if (stopCurrentSolving.get()) return;
+            final int row = cell.row;
+            final int col = cell.col;
+            SwingUtilities.invokeLater(() -> mazePanel.setPlayerPosition(row, col));
+            if (!sleepInterruptible(WALK_DELAY)) return;
+        }
+
+        if (!stopCurrentSolving.get()) {
+            final int cost = totalCost;
+            SwingUtilities.invokeLater(() -> showPathCost(cost));
+        }
+    }
+
+    private boolean sleepInterruptible(int ms) {
+        try {
+            Thread.sleep(ms);
+            return !stopCurrentSolving.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private void showPathCost(int cost) {
+        isWinDialogOpen = true;
+
+        SoundManager.stopSound(heroMusic);
+        endMusic = SoundManager.playSoundLoop("end.wav");
+
+        if (heroThread != null && heroThread.isAlive()) {
+            heroThread.interrupt();
+        }
+        SoundManager.stopSound(heroMusic);
+
+        JDialog dialog = new JDialog(this, "🍄 SUCCESS! 🍄", true);
+        dialog.setLayout(new BorderLayout());
+        dialog.getContentPane().setBackground(new Color(65, 105, 225));
+
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(new Color(65, 105, 225));
+        panel.setBorder(BorderFactory.createEmptyBorder(25, 40, 20, 40));
+
+        JLabel titleLabel = new JLabel("🏆 LEVEL COMPLETE! 🏆");
+        titleLabel.setFont(new Font("Monospaced", Font.BOLD, 24));
+        titleLabel.setForeground(new Color(255, 253, 150));
+        titleLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(titleLabel);
+        panel.add(Box.createVerticalStrut(15));
+
+        JLabel costLabel = new JLabel("TOTAL COST: " + cost);
+        costLabel.setFont(new Font("Monospaced", Font.BOLD, 32));
+        costLabel.setForeground(Color.WHITE);
+        costLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(costLabel);
+        panel.add(Box.createVerticalStrut(12));
+
+        JLabel messageLabel = new JLabel("⭐ CONGRATULATIONS! ⭐");
+        messageLabel.setFont(new Font("Monospaced", Font.BOLD, 18));
+        messageLabel.setForeground(new Color(50, 205, 50));
+        messageLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(messageLabel);
+        panel.add(Box.createVerticalStrut(18));
+
+        JPanel buttonPanel = new JPanel();
+        buttonPanel.setLayout(new FlowLayout(FlowLayout.CENTER, 15, 0));
+        buttonPanel.setOpaque(false);
+
+        JButton okButton = createWinButton("PLAY AGAIN", BUTTON_GREEN);
+        okButton.addActionListener(e -> {
+            SoundManager.stopSound(endMusic);  // ✅ STOP end.wav
+            bgMusic = SoundManager.playSoundLoop("backsound.wav");  // ✅ PLAY backsound lagi
+            isWinDialogOpen = false;
+            dialog.dispose();  // Tutup dialog
+        });
+        buttonPanel.add(okButton);
+
+        JButton exitButton = createWinButton("EXIT", BUTTON_RED);
+        exitButton.addActionListener(e -> {
+            SoundManager.stopSound(endMusic);  // ✅ STOP end.wav juga saat exit
+            dialog.dispose();
+            exitGame();
+        });
+        buttonPanel.add(exitButton);
+
+        buttonPanel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(buttonPanel);
+        dialog.add(panel);
+        dialog.pack();
+        dialog.setLocationRelativeTo(this);
+        dialog.setResizable(false);
+        dialog.setVisible(true);
+
+        dialog.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosed(java.awt.event.WindowEvent e) {
+                // Cek apakah bgMusic masih null (berarti user belum klik PLAY AGAIN)
+                if (bgMusic == null || !bgMusic.isRunning()) {
+                    // Stop end music dan play backsound lagi
+                    SoundManager.stopSound(endMusic);
+                    bgMusic = SoundManager.playSoundLoop("backsound.wav");
+                }
+            }
+        });
+
+    }
+
+    private JButton createWinButton(String text, Color bgColor) {
+        JButton btn = new JButton(text);
+        btn.setFont(new Font("Monospaced", Font.BOLD, 18));
+        btn.setForeground(Color.WHITE);
+        btn.setFocusPainted(false);
+        btn.setBorderPainted(false);
+        btn.setContentAreaFilled(false);
+        btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        btn.setPreferredSize(new Dimension(160, 45));
+        btn.setMaximumSize(new Dimension(160, 45));
+        btn.setMinimumSize(new Dimension(160, 45));
+
+        btn.setUI(new BasicButtonUI() {
+            @Override
+            public void paint(Graphics g, JComponent c) {
+                Graphics2D g2d = (Graphics2D) g;
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+                AbstractButton button = (AbstractButton) c;
+                int width = button.getWidth();
+                int height = button.getHeight();
+                Color currentColor = button.getModel().isRollover() ? bgColor.brighter() : bgColor;
+                if (button.getModel().isPressed()) {
+                    currentColor = bgColor.darker();
+                }
+
+                GradientPaint gradient = new GradientPaint(
+                        0, 0, brighten(currentColor, 0.4f),
+                        0, height, currentColor
+                );
+                g2d.setPaint(gradient);
+                g2d.fillRoundRect(0, 0, width, height, 15, 15);
+
+                GradientPaint highlight = new GradientPaint(
+                        0, 0, new Color(255, 255, 255, 120),
+                        0, height / 2, new Color(255, 255, 255, 0)
+                );
+                g2d.setPaint(highlight);
+                g2d.fillRoundRect(0, 0, width, height / 2, 15, 15);
+                g2d.setColor(new Color(0, 0, 0, 40));
+                g2d.drawRoundRect(0, 0, width - 1, height - 1, 15, 15);
+                super.paint(g, c);
+            }
+        });
+
+        btn.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseEntered(java.awt.event.MouseEvent evt) {
+                btn.repaint();
+            }
+            public void mouseExited(java.awt.event.MouseEvent evt) {
+                btn.repaint();
+            }
+        });
+        return btn;
+    }
+
+    private void resetMaze() {
+        stopCurrentThread();
+        initializeMaze();
+        graph = null;
+        start = null;
+        end = null;
+        SwingUtilities.invokeLater(() -> {
+            mazePanel.setMaze(maze);
+            mazePanel.setPlayerPosition(0, 0);
+        });
+    }
+
+    private void resetSolution() {
+        for (int i = 0; i < ROWS; i++) {
+            for (int j = 0; j < COLS; j++) {
+                maze[i][j].isVisited = false;
+                maze[i][j].isPath = false;
+            }
+        }
+        mazePanel.repaint();
+    }
+
+    private void startNewSolving(Runnable solvingTask) {
+        stopCurrentThread();
+        SwingUtilities.invokeLater(() -> {
+            resetSolution();
+            if (start != null) {
+                mazePanel.setPlayerPosition(start.row, start.col);
+            }
+        });
+
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        stopCurrentSolving.set(false);
+        currentSolvingThread = new Thread(solvingTask);
+        currentSolvingThread.start();
+    }
+
+    private static class MarioIcon implements Icon {
+        public enum Type { COIN, STAR }
+        private int width, height;
+        private Type type;
+
+        public MarioIcon(int w, int h, Type type) {
+            this.width = w; this.height = h; this.type = type;
+        }
+        @Override public int getIconWidth() { return width; }
+        @Override public int getIconHeight() { return height; }
+        @Override
+
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2d = (Graphics2D) g;
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+            int size = Math.min(width, height);
+            if (type == Type.COIN) {
+                g2d.setColor(new Color(248, 192, 0));
+                g2d.fillOval(x, y, size, size);
+                g2d.setColor(new Color(200, 150, 0));
+                g2d.drawOval(x, y, size, size);
+                g2d.drawOval(x + 2, y + 2, size - 4, size - 4);
+                g2d.setColor(new Color(255, 220, 100));
+                g2d.fillOval(x + size/4, y + size/4, size/4, size/4);
+            } else if (type == Type.STAR) {
+                g2d.setColor(new Color(248, 192, 0));
+                int s = size/4;
+                g2d.fillRect(x + s, y, s*2, s*4);
+                g2d.fillRect(x, y + s, s*4, s*2);
+                g2d.setColor(new Color(255, 255, 255));
+                g2d.fillRect(x + s, y + s, s*2, s*2);
+            }
+        }
+    }
+
 }
