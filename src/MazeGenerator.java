@@ -194,4 +194,167 @@ public class MazeGenerator extends JFrame {
         return mainPanel;
     }
 
+    private void exitGame() {
+        final boolean[] wasPlayingEndMusic = {(endMusic != null && endMusic.isRunning())};
+
+        JButton yesButton = createGlossyOptionButton("YES", BUTTON_RED );
+        JButton noButton = createGlossyOptionButton("NO", BUTTON_GREEN);
+
+        JPanel panel = new JPanel();
+        panel.setBackground(PANEL_COLOR);
+        JLabel messageLabel = new JLabel("Are you sure you want to exit?");
+        messageLabel.setFont(PIXEL_FONT);
+        messageLabel.setForeground(Color.WHITE);
+        panel.add(messageLabel);
+
+        JOptionPane optionPane = new JOptionPane(
+                panel,
+                JOptionPane.QUESTION_MESSAGE,
+                JOptionPane.YES_NO_OPTION,
+                null,
+                new Object[]{},null
+        );
+
+        JDialog dialog = optionPane.createDialog(this, "Exit Game");
+        dialog.getContentPane().setBackground(PANEL_COLOR);
+
+        yesButton.addActionListener(e -> {
+            dialog.dispose();
+            stopCurrentThread();
+            SoundManager.stopSound(bgMusic);  // Stop all music
+            SoundManager.stopSound(endMusic);
+            SoundManager.stopSound(heroMusic);
+            System.exit(0);
+        });
+
+        noButton.addActionListener(e -> {
+            dialog.dispose();
+
+            // Kalau dari WIN dialog, play backsound lagi
+            if (isWinDialogOpen) {
+                isWinDialogOpen = false;  // Reset flag
+                bgMusic = SoundManager.playSoundLoop("backsound.wav");
+            }
+        });
+
+        noButton.addActionListener(e -> {
+            dialog.dispose();  // Tutup dialog aja
+        });
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
+        buttonPanel.setBackground(PANEL_COLOR);
+        buttonPanel.add(yesButton);
+        buttonPanel.add(noButton);
+
+        JPanel contentPanel = new JPanel(new BorderLayout(10, 10));
+        contentPanel.setBackground(PANEL_COLOR);
+        contentPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        contentPanel.add(panel, BorderLayout.CENTER);
+        contentPanel.add(buttonPanel, BorderLayout.SOUTH);
+
+        dialog.setContentPane(contentPanel);
+        dialog.pack();
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    private JButton createGlossyOptionButton(String text, Color bgColor) {
+        JButton btn = new JButton(text);
+        btn.setFont(new Font("Monospaced", Font.BOLD, 16));
+        btn.setForeground(Color.WHITE);
+        btn.setFocusPainted(false);
+        btn.setBorderPainted(false);
+        btn.setContentAreaFilled(false);
+        btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        btn.setPreferredSize(new Dimension(100, 40));
+
+        btn.setUI(new BasicButtonUI() {
+            @Override
+            public void paint(Graphics g, JComponent c) {
+                Graphics2D g2d = (Graphics2D) g;
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+                AbstractButton button = (AbstractButton) c;
+                int width = button.getWidth();
+                int height = button.getHeight();
+
+                Color currentColor = button.getModel().isRollover() ? bgColor.brighter() : bgColor;
+                if (button.getModel().isPressed()) {
+                    currentColor = bgColor.darker();
+                }
+
+                GradientPaint gradient = new GradientPaint(
+                        0, 0, brighten(currentColor, 0.4f),
+                        0, height, currentColor
+                );
+                g2d.setPaint(gradient);
+                g2d.fillRoundRect(0, 0, width, height, 12, 12);
+
+                GradientPaint highlight = new GradientPaint(
+                        0, 0, new Color(255, 255, 255, 120),
+                        0, height / 2, new Color(255, 255, 255, 0)
+                );
+                g2d.setPaint(highlight);
+                g2d.fillRoundRect(0, 0, width, height / 2, 12, 12);
+
+                g2d.setColor(new Color(0, 0, 0, 40));
+                g2d.drawRoundRect(0, 0, width - 1, height - 1, 12, 12);
+                super.paint(g, c);
+            }
+        });
+
+        btn.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseEntered(java.awt.event.MouseEvent evt) {
+                btn.repaint();
+            }
+            public void mouseExited(java.awt.event.MouseEvent evt) {
+                btn.repaint();
+            }
+        });
+        return btn;
+    }
+
+    private JPanel createCompactTerrainItem(String text, Color color) {
+        JPanel item = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        item.setOpaque(false);
+
+        JPanel colorBox = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                g.setColor(color);
+                g.fillRect(0, 0, getWidth(), getHeight());
+
+                Random rng = new Random(text.hashCode());
+                if (color.equals(Terrain.STONE.color)) {
+                    g.setColor(new Color(139, 90, 43));
+                    for(int i = 0; i < 2; i++) {
+                        g.drawRect(1, i * 9, 16, 9);
+                    }
+                } else if (color.equals(Terrain.GRASS.color)) {
+                    g.setColor(new Color(43, 140, 33));
+                    for(int i=0; i<3; i++) g.fillRect(rng.nextInt(14), rng.nextInt(14), 2, 3);
+                } else if (color.equals(Terrain.SAND.color)) {
+                    g.setColor(new Color(200, 150, 0));
+                    for(int i=0; i<5; i++) g.fillRect(rng.nextInt(14), rng.nextInt(14), 1, 1);
+                } else if (color.equals(Terrain.LAVA.color)) {
+                    g.setColor(new Color(255, 140, 0));
+                    for(int i=0; i<2; i++) g.fillRect(rng.nextInt(12), rng.nextInt(12), 3, 3);
+                }
+            }
+        };
+
+        colorBox.setPreferredSize(new Dimension(18, 18));
+        colorBox.setBorder(BorderFactory.createLineBorder(Color.BLACK, 2));
+        item.add(colorBox);
+
+        JLabel label = new JLabel(text);
+        label.setForeground(LABEL_TEXT_COLOR);
+        label.setFont(LEGEND_FONT);
+        item.add(label);
+        return item;
+    }
+
+
+
 }
